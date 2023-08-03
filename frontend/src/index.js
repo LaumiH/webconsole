@@ -1,40 +1,35 @@
+import './_assets/styles/base.scss';
+
 import React from 'react';
-import ReactDOM from 'react-dom';
-import {Provider} from 'react-redux';
-import {HashRouter} from 'react-router-dom';
+import { createRoot } from 'react-dom/client';
+import { Provider } from 'react-redux';
+import { BrowserRouter } from 'react-router-dom';
+import { store } from './_store';
+import { App } from './App';
 
-import App from './pages/App';
-import configureStore from './config/configureStore';
-import registerServiceWorker from './registerServiceWorker';
+// setup fake backend (e.g., you can use it for testing new features)
+//import { fakeBackend } from './_helpers';
+//fakeBackend();
 
-// dependency CSS
-import 'bootstrap/dist/css/bootstrap.min.css';
-import '@fortawesome/fontawesome-free/css/all.min.css';
+const container = document.getElementById('root');
+const root = createRoot(container);
 
-import './assets/styles/base.scss';
+// useful hint: if you see the dispatch executed twice while using the dev server: StrictMode is the reason
 
-
-export const store = configureStore();
-const rootElement = document.getElementById('root');
-
-const renderApp = Component => {
-  ReactDOM.render(
+/*root.render(
+  <React.StrictMode>
     <Provider store={store}>
-      <HashRouter>
-        <Component />
-      </HashRouter>
-    </Provider>,
-    rootElement
-  );
-};
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </Provider>
+  </React.StrictMode>
+);*/
 
-renderApp(App);
-
-if (module.hot) {
-  module.hot.accept('./pages/App', () => {
-    const NextApp = require('./pages/App').default;
-    renderApp(NextApp);
-  });
-}
-
-registerServiceWorker();
+root.render(
+    <Provider store={store}>
+        <BrowserRouter>
+            <App />
+        </BrowserRouter>
+    </Provider>
+);

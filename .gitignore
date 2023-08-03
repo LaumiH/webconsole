@@ -12,10 +12,12 @@
 bin/
 log/
 vendor/
-public/
 
 node_modules/
 yarn.lock
+public/
+build/
+frontend/build/
 
 # emacs/vim
 GPATH

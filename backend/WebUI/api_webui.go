@@ -2,11 +2,11 @@ package WebUI
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -39,6 +39,8 @@ const (
 	msisdnSupiMapColl = "subscriptionData.msisdnSupiMap"
 )
 
+var jwtKey = "" // for generating JWT
+
 var httpsClient *http.Client
 
 func init() {
@@ -47,6 +49,67 @@ func init() {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
+}
+
+// Create Admin's Tenant & Account
+func SetAdmin() {
+	err := mongoapi.RestfulAPIDeleteOne("tenantData", bson.M{"tenantName": "admin"})
+	if err != nil {
+		logger.InitLog.Errorf("RestfulAPIDeleteOne err: %+v", err)
+	}
+	err = mongoapi.RestfulAPIDeleteOne("userData", bson.M{"email": "admin"})
+	if err != nil {
+		logger.InitLog.Errorf("RestfulAPIDeleteOne err: %+v", err)
+	}
+
+	// Create Admin tenant
+	logger.InitLog.Infoln("Create tenant: admin")
+
+	adminTenantData := bson.M{
+		"tenantId":   uuid.Must(uuid.NewRandom()).String(),
+		"tenantName": "admin",
+	}
+
+	_, err = mongoapi.RestfulAPIPutOne("tenantData", bson.M{"tenantName": "admin"}, adminTenantData)
+	if err != nil {
+		logger.InitLog.Errorf("RestfulAPIPutOne err: %+v", err)
+	}
+
+	AmdinTenant, err := mongoapi.RestfulAPIGetOne("tenantData", bson.M{"tenantName": "admin"})
+	if err != nil {
+		logger.InitLog.Errorf("RestfulAPIGetOne err: %+v", err)
+	}
+
+	// Create Admin user
+	logger.InitLog.Infoln("Create user: admin")
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("free5gc"), 12)
+	if err != nil {
+		logger.InitLog.Errorf("GenerateFromPassword err: %+v", err)
+	}
+
+	adminUserData := bson.M{
+		"userId":            uuid.Must(uuid.NewRandom()).String(),
+		"tenantId":          AmdinTenant["tenantId"],
+		"email":             "admin",
+		"encryptedPassword": string(hash),
+	}
+
+	_, err = mongoapi.RestfulAPIPutOne("userData", bson.M{"email": "admin"}, adminUserData)
+	if err != nil {
+		logger.InitLog.Errorf("RestfulAPIPutOne err: %+v", err)
+	}
+}
+
+func InitJwtKey() error {
+	randomBytes := make([]byte, 256)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		return errors.Wrap(err, "Init JWT key error")
+	} else {
+		jwtKey = string(randomBytes)
+	}
+	return nil
 }
 
 func mapToByte(data map[string]interface{}) (ret []byte) {
@@ -367,8 +430,8 @@ func GetSampleJSON(c *gin.Context) {
 	ueId := "imsi-2089300007487"
 
 	subsData = SubsData{
-		PlmnID:                            servingPlmnId,
-		UeId:                              ueId,
+		PlmnId:                            servingPlmnId,
+		Supi:                              ueId,
 		AuthenticationSubscription:        authSubsData,
 		AccessAndMobilitySubscriptionData: amDataData,
 		SessionManagementSubscriptionData: smDataData,
@@ -401,9 +464,14 @@ func JWT(email, userId, tenantId string) string {
 	claims["email"] = email
 	claims["tenantId"] = tenantId
 
-	tokenString, err := token.SignedString([]byte(os.Getenv("SIGNINGKEY")))
+	if jwtKey == "" {
+		return ""
+	}
+
+	tokenString, err := token.SignedString([]byte(jwtKey))
 	if err != nil {
 		logger.ProcLog.Errorf("JWT err: %+v", err)
+		return ""
 	}
 
 	return tokenString
@@ -423,6 +491,9 @@ func Login(c *gin.Context) {
 	setCorsHeader(c)
 
 	login := LoginRequest{}
+
+	logger.ProcLog.Infof("Login attempt with username: %s and password: %s", login.Username, login.Password)
+
 	err := json.NewDecoder(c.Request.Body).Decode(&login)
 	if err != nil {
 		logger.ProcLog.Warnln("JSON decode error", err)
@@ -463,12 +534,18 @@ func Login(c *gin.Context) {
 	userId := userData["userId"].(string)
 	tenantId := userData["tenantId"].(string)
 
-	logger.ProcLog.Warnln("Login success", login.Username)
-	logger.ProcLog.Warnln("userid", userId)
-	logger.ProcLog.Warnln("tenantid", tenantId)
+	logger.ProcLog.Warnln("Login success {",
+		"username:", login.Username,
+		", userid:", userId,
+		", tenantid:", tenantId,
+		"}")
 
 	token := JWT(login.Username, userId, tenantId)
-	logger.ProcLog.Warnln("token", token)
+	if token == "" {
+		logger.ProcLog.Errorln("token is empty")
+	} else {
+		logger.ProcLog.Warnln("token", token)
+	}
 
 	oauth := OAuth{}
 	oauth.AccessToken = token
@@ -490,7 +567,7 @@ type AuthSub struct {
 // Parse JWT
 func ParseJWT(tokenStr string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		return []byte(os.Getenv("SIGNINGKEY")), nil
+		return []byte(jwtKey), nil
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "ParseJWT error")
@@ -504,9 +581,12 @@ func ParseJWT(tokenStr string) (jwt.MapClaims, error) {
 // Check of admin user. This should be done with proper JWT token.
 func CheckAuth(c *gin.Context) bool {
 	tokenStr := c.GetHeader("Token")
-	if tokenStr == "admin" {
+	claims, err := ParseJWT(tokenStr)
+
+	if err == nil && claims["email"] == "admin" {
 		return true
 	} else {
+		logger.ProcLog.Errorln("Unauthorized request: Illegal Token")
 		return false
 	}
 }
@@ -514,7 +594,7 @@ func CheckAuth(c *gin.Context) bool {
 // Tenant ID
 func GetTenantId(c *gin.Context) (string, error) {
 	tokenStr := c.GetHeader("Token")
-	if tokenStr == "admin" {
+	if CheckAuth(c) {
 		return "", nil
 	}
 	claims, err := ParseJWT(tokenStr)
@@ -530,7 +610,7 @@ func GetTenants(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -554,7 +634,7 @@ func GetTenantByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -586,7 +666,7 @@ func PostTenant(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -596,6 +676,7 @@ func PostTenant(c *gin.Context) {
 		return
 	}
 
+	// fmt.Println("in Post Tenant")
 	if tenantData.TenantId == "" {
 		tenantData.TenantId = uuid.Must(uuid.NewRandom()).String()
 	}
@@ -615,7 +696,7 @@ func PutTenantByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -655,7 +736,7 @@ func DeleteTenantByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -697,7 +778,7 @@ func GetUsers(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -734,7 +815,7 @@ func GetUserByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -774,7 +855,7 @@ func PostUserByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -828,7 +909,7 @@ func PutUserByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -904,7 +985,7 @@ func DeleteUserByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
-		c.JSON(http.StatusNotFound, bson.M{})
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
 		return
 	}
 
@@ -929,15 +1010,25 @@ func DeleteUserByID(c *gin.Context) {
 func GetSubscribers(c *gin.Context) {
 	setCorsHeader(c)
 
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
 	logger.ProcLog.Infoln("Get All Subscribers List")
 
-	tokenStr := c.GetHeader("Token")
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("GetSubscribers err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while getting all subscribers",
+			})
+			return
+		}
+	}()
 
-	var claims jwt.MapClaims = nil
-	var err error = nil
-	if tokenStr != "admin" {
-		claims, err = ParseJWT(tokenStr)
-	}
+	tokenStr := c.GetHeader("Token")
+	claims, err := ParseJWT(tokenStr)
 	if err != nil {
 		logger.ProcLog.Errorln(err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -975,10 +1066,10 @@ func GetSubscribers(c *gin.Context) {
 			return
 		}
 
-		if tokenStr == "admin" || tenantId == claims["tenantId"].(string) {
+		if claims["email"] == "admin" || tenantId == claims["tenantId"].(string) {
 			tmp := SubsListIE{
-				PlmnID: servingPlmnId.(string),
-				UeId:   ueId.(string),
+				PlmnId: servingPlmnId.(string),
+				Supi:   ueId.(string),
 				Msisdn: msisdn,
 			}
 			subsList = append(subsList, tmp)
@@ -991,13 +1082,28 @@ func GetSubscribers(c *gin.Context) {
 func GetSubscriberByID(c *gin.Context) {
 	setCorsHeader(c)
 
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
 	logger.ProcLog.Infoln("Get One Subscriber Data")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("GetSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while getting single subscriber",
+			})
+			return
+		}
+	}()
 
 	var subsData SubsData
 
-	ueId := c.Param("ueId")
+	ueId := c.Param("supi")
 	ueId = msisdnToSupi(ueId)
-	servingPlmnId := c.Param("servingPlmnId")
+	servingPlmnId := c.Param("plmnId")
 	// checking whether msisdn is successfully transformed to supi or not
 	if ueId == "" {
 		logger.ProcLog.Errorf("GetSubscriberByID err: msisdn does not exists")
@@ -1125,8 +1231,8 @@ func GetSubscriberByID(c *gin.Context) {
 	}
 
 	subsData = SubsData{
-		PlmnID:                            servingPlmnId,
-		UeId:                              ueId,
+		PlmnId:                            servingPlmnId,
+		Supi:                              ueId,
 		AuthenticationSubscription:        authSubsData,
 		AccessAndMobilitySubscriptionData: amDataData,
 		SessionManagementSubscriptionData: smDataData,
@@ -1151,18 +1257,39 @@ func GetSubscriberByID(c *gin.Context) {
 // @Param subdata body SubsData true "sub data"
 // @Success      201 "Create subscription success"
 // @Failure 400 {object} HTTPError "JSON format incorrect"
-// @Router  /subscriber/{ueId}/{servingPlmnId}/{userNumber} [post]
+// @Router  /subscriber/{ueId}/{servingPlmnId} [post]
 func PostSubscriberByID(c *gin.Context) {
 	setCorsHeader(c)
-	logger.ProcLog.Infoln("Post One Subscriber Data")
 
-	var claims jwt.MapClaims = nil
-	var err error = nil
-	tokenStr := c.GetHeader("Token")
-
-	if tokenStr != "admin" {
-		claims, err = ParseJWT(tokenStr)
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
 	}
+
+	logger.ProcLog.Infoln("Post One Subscriber")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("PostSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while creating subscriber",
+			})
+			return
+		}
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("PostSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while creating subscriber",
+			})
+			return
+		}
+	}()
+
+	tokenStr := c.GetHeader("Token")
+	claims, err := ParseJWT(tokenStr)
 	if err != nil {
 		logger.ProcLog.Errorln(err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1180,8 +1307,8 @@ func PostSubscriberByID(c *gin.Context) {
 		})
 		return
 	}
-	ueId := strings.Split(c.Param("ueId"), "-")[1]
-	servingPlmnId := c.Param("servingPlmnId")
+	ueId := strings.Split(c.Param("supi"), "-")[1]
+	servingPlmnId := c.Param("plmnId")
 	userNumber := c.Param("userNumber")
 	if userNumber == "" {
 		userNumber = "1"
@@ -1256,6 +1383,146 @@ func PostSubscriberByID(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{})
 }
 
+// Post multiple subscribers by IMSI(ueId) and PlmnID(servingPlmnId)
+// PostMultipleSubscribersByID godoc
+// @Summary     CreateSubscriberByID
+// @Description Create multiple subscribers by IMSI(ueId) and PlmnID(servingPlmnId), auto-increase IMSI
+// @Accept       json
+// @Produce      json
+// @Param ueId path string true "imsi"
+// @Param servingPlmnId path string true "servingPlmnId"
+// @Param userNumber path string true "userNumber"
+// @Param subdata body SubsData true "sub data"
+// @Success      201 "Create subscription success"
+// @Failure 400 {object} HTTPError "JSON format incorrect"
+// @Router  /subscriber/{ueId}/{servingPlmnId}/{userNumber} [post]
+func PostMultipleSubscribersByID(c *gin.Context) {
+	setCorsHeader(c)
+
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
+	logger.ProcLog.Infoln("Post Multiple Subscribers With Increasing IMSI")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("PostMultipleSubscribersByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while creating multiple subscribers",
+			})
+			return
+		}
+	}()
+
+	var claims jwt.MapClaims = nil
+	var err error = nil
+	tokenStr := c.GetHeader("Token")
+
+	if tokenStr != "admin" {
+		claims, err = ParseJWT(tokenStr)
+	}
+	if err != nil {
+		logger.ProcLog.Errorln(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"cause": "Illegal Token",
+		})
+		return
+	}
+
+	var subsData SubsData
+	err = c.ShouldBindJSON(&subsData)
+	if err != nil {
+		logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"cause": "JSON format incorrect",
+		})
+		return
+	}
+	ueId := strings.Split(c.Param("supi"), "-")[1]
+	servingPlmnId := c.Param("plmnId")
+	userNumber := c.Param("userNumber")
+	if userNumber == "" {
+		logger.ProcLog.Errorln("PostMultipleSubscribersByID err: user number is empty")
+		c.JSON(http.StatusBadRequest, gin.H{
+			"cause": "userNumber empty",
+		})
+		return
+	}
+	userNumberTemp, err := strconv.Atoi(userNumber)
+	if err != nil {
+		logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"cause": "userNumber format incorrect",
+		})
+		return
+	}
+	msisdn := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
+	msisdnTemp := 0
+	if msisdn != "" {
+		msisdnTemp, err = strconv.Atoi(msisdn)
+		if err != nil {
+			logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"cause": "msisdn format incorrect",
+			})
+			return
+		}
+	}
+
+	ueIdTemp, err := strconv.Atoi(ueId)
+	if err != nil {
+		logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"cause": "ueId format incorrect",
+		})
+		return
+	}
+
+	for i := 0; i < userNumberTemp; i++ {
+		ueId = fmt.Sprintf("imsi-%015d", ueIdTemp)
+		if msisdnTemp != 0 {
+			if !validate(ueId, msisdn) {
+				logger.ProcLog.Errorf("duplicate msisdn: %v", msisdn)
+				c.JSON(http.StatusBadRequest, gin.H{
+					"cause": "duplicate msisdn",
+				})
+				return
+			}
+			//msisdnTemp += 1
+		}
+		//ueIdTemp += 1
+
+		subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdn
+		// create a msisdn-supi map
+		logger.ProcLog.Infof("PostMultipleSubscribersByID msisdn: %+v", msisdn)
+		msisdnSupiMapOperation(ueId, msisdn, "post")
+		filterUeIdOnly := bson.M{"ueId": ueId}
+
+		// Lookup same UE ID of other tenant's subscription.
+		if claims != nil {
+			authSubsDataInterface, err := mongoapi.RestfulAPIGetOne(authSubsDataColl, filterUeIdOnly)
+			if err != nil {
+				logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{})
+				return
+			}
+			if len(authSubsDataInterface) > 0 {
+				if authSubsDataInterface["tenantId"].(string) != claims["tenantId"].(string) {
+					c.JSON(http.StatusUnprocessableEntity, gin.H{})
+					return
+				}
+			}
+		}
+		dbOperation(ueId, servingPlmnId, "post", &subsData, claims)
+
+		msisdn = strconv.Itoa(msisdnTemp + 1)
+		ueIdTemp += 1
+	}
+	c.JSON(http.StatusCreated, gin.H{})
+}
+
 func validate(supi string, msisdn string) bool {
 	filter := bson.M{"msisdn": msisdn}
 	msisdnSupiMap, err := mongoapi.RestfulAPIGetOne(msisdnSupiMapColl, filter)
@@ -1291,6 +1558,39 @@ func dbOperation(ueId string, servingPlmnId string, method string, subsData *Sub
 	filterUeIdOnly := bson.M{"ueId": ueId}
 	filter := bson.M{"ueId": ueId, "servingPlmnId": servingPlmnId}
 
+	// Set Sd value to lower case
+	if subsData != nil {
+		if subsData.AccessAndMobilitySubscriptionData.Nssai != nil {
+			defaultSingleNssais := subsData.AccessAndMobilitySubscriptionData.Nssai.DefaultSingleNssais
+			for i := range defaultSingleNssais {
+				defaultSingleNssais[i].Sd = strings.ToLower(defaultSingleNssais[i].Sd)
+			}
+
+			singleNssais := subsData.AccessAndMobilitySubscriptionData.Nssai.SingleNssais
+			for i := range singleNssais {
+				singleNssais[i].Sd = strings.ToLower(singleNssais[i].Sd)
+			}
+		}
+
+		subscriptionDatas := subsData.SessionManagementSubscriptionData
+		for i := range subscriptionDatas {
+			subscriptionDatas[i].SingleNssai.Sd = strings.ToLower(subscriptionDatas[i].SingleNssai.Sd)
+		}
+
+		subscribedSnssaiInfos := subsData.SmfSelectionSubscriptionData.SubscribedSnssaiInfos
+		for sd, subscribedSnssaiInfo := range subscribedSnssaiInfos {
+			newSd := strings.ToLower(sd)
+			if newSd != sd {
+				delete(subsData.SmfSelectionSubscriptionData.SubscribedSnssaiInfos, sd)
+				subsData.SmfSelectionSubscriptionData.SubscribedSnssaiInfos[newSd] = subscribedSnssaiInfo
+			}
+		}
+
+		smPolicySnssaiDatas := subsData.SmPolicyData.SmPolicySnssaiData
+		for i := range smPolicySnssaiDatas {
+			smPolicySnssaiDatas[i].Snssai.Sd = strings.ToLower(smPolicySnssaiDatas[i].Snssai.Sd)
+		}
+	}
 	// Replace all data with new one
 	if method == "put" {
 		if err := mongoapi.RestfulAPIDeleteMany(flowRuleDataColl, filter); err != nil {
@@ -1424,7 +1724,24 @@ func dbOperation(ueId string, servingPlmnId string, method string, subsData *Sub
 // Put subscriber by IMSI(ueId) and PlmnID(servingPlmnId)
 func PutSubscriberByID(c *gin.Context) {
 	setCorsHeader(c)
+
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
 	logger.ProcLog.Infoln("Put One Subscriber Data")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("PutSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while creating subscriber",
+			})
+			return
+		}
+	}()
+
 	var subsData SubsData
 	if err := c.ShouldBindJSON(&subsData); err != nil {
 		logger.ProcLog.Errorf("PutSubscriberByID err: %v", err)
@@ -1433,8 +1750,8 @@ func PutSubscriberByID(c *gin.Context) {
 		})
 		return
 	}
-	ueId := c.Param("ueId")
-	servingPlmnId := c.Param("servingPlmnId")
+	ueId := c.Param("supi")
+	servingPlmnId := c.Param("plmnId")
 	// modify a msisdn-supi map
 	msisdn := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
 	if !validate(ueId, msisdn) {
@@ -1456,7 +1773,23 @@ func PutSubscriberByID(c *gin.Context) {
 // Patch subscriber by IMSI(ueId) and PlmnID(servingPlmnId)
 func PatchSubscriberByID(c *gin.Context) {
 	setCorsHeader(c)
+
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
 	logger.ProcLog.Infoln("Patch One Subscriber Data")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("PatchSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while modifying subscriber",
+			})
+			return
+		}
+	}()
 
 	var subsData SubsData
 	if err := c.ShouldBindJSON(&subsData); err != nil {
@@ -1467,9 +1800,9 @@ func PatchSubscriberByID(c *gin.Context) {
 		return
 	}
 
-	ueId := c.Param("ueId")
+	ueId := c.Param("supi")
 	ueId = msisdnToSupi(ueId)
-	servingPlmnId := c.Param("servingPlmnId")
+	servingPlmnId := c.Param("plmnId")
 	// checking whether msisdn is successfully transformed to supi or not
 	if ueId == "" {
 		logger.ProcLog.Errorf("PatchSubscriberByID err: msisdn does not exists")
@@ -1545,10 +1878,27 @@ func PatchSubscriberByID(c *gin.Context) {
 // Delete subscriber by IMSI(ueId) and PlmnID(servingPlmnId)
 func DeleteSubscriberByID(c *gin.Context) {
 	setCorsHeader(c)
+
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
 	logger.ProcLog.Infoln("Delete One Subscriber Data")
-	ueId := c.Param("ueId")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("DeleteSubscriberByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while deleting subscriber",
+			})
+			return
+		}
+	}()
+
+	ueId := c.Param("supi")
 	ueId = msisdnToSupi(ueId)
-	servingPlmnId := c.Param("servingPlmnId")
+	servingPlmnId := c.Param("plmnId")
 	// checking whether msisdn is successfully transformed to supi or not
 	if ueId == "" {
 		logger.ProcLog.Errorf("DeleteSubscriberByID err: msisdn does not exists")
@@ -1562,25 +1912,32 @@ func DeleteSubscriberByID(c *gin.Context) {
 	c.JSON(http.StatusNoContent, gin.H{})
 }
 
-func GetRegisteredUEContext(c *gin.Context) {
+func GetAmfUeContexts(c *gin.Context) {
 	setCorsHeader(c)
 
-	logger.ProcLog.Infoln("Get Registered UE Context")
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
+	logger.ProcLog.Infoln("Get Registered UEs and Their Contexts From AMF")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("GetAmfUeContexts err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while getting AMF UE contexts",
+			})
+			return
+		}
+	}()
 
 	webuiSelf := webui_context.GetSelf()
 	webuiSelf.UpdateNfProfiles()
 
-	supi, supiExists := c.Params.Get("supi")
-
 	// TODO: support fetching data from multiple AMFs
 	if amfUris := webuiSelf.GetOamUris(models.NfType_AMF); amfUris != nil {
-		var requestUri string
-
-		if supiExists {
-			requestUri = fmt.Sprintf("%s/namf-oam/v1/registered-ue-context/%s", amfUris[0], supi)
-		} else {
-			requestUri = fmt.Sprintf("%s/namf-oam/v1/registered-ue-context", amfUris[0])
-		}
+		requestUri := fmt.Sprintf("%s/namf-oam/v1/registered-ue-context", amfUris[0])
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestUri, nil)
 		if err != nil {
@@ -1617,15 +1974,96 @@ func GetRegisteredUEContext(c *gin.Context) {
 		}
 	} else {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"cause": "No AMF Found",
+			"cause": "No AMF found. Is the core running?",
 		})
 	}
 }
 
-func GetUEPDUSessionInfo(c *gin.Context) {
+// not required, AMF currently returns all contexts at once
+//func GetAmfUeContextByID(c *gin.Context) {
+//	setCorsHeader(c)
+
+//	if !CheckAuth(c) {
+//		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+//		return
+//	}
+//
+//	logger.ProcLog.Infoln("Get AMF UE Context By ID")
+//
+//	webuiSelf := webui_context.GetSelf()
+//	webuiSelf.UpdateNfProfiles()
+//
+//	supi, supiExists := c.Params.Get("supi")
+//
+//	if !supiExists {
+//		logger.ProcLog.Errorln("GetAmfUeContextByID err: missing supi parameter")
+//		c.JSON(http.StatusInternalServerError, gin.H{})
+//		return
+//	}
+//
+//	// TODO: support fetching data from multiple AMFs
+//	if amfUris := webuiSelf.GetOamUris(models.NfType_AMF); amfUris != nil {
+//		requestUri := fmt.Sprintf("%s/namf-oam/v1/registered-ue-context/%s", amfUris[0], supi)
+//
+//		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestUri, nil)
+//		if err != nil {
+//			logger.ProcLog.Error(err)
+//			c.JSON(http.StatusInternalServerError, gin.H{})
+//			return
+//		}
+//		resp, err := httpsClient.Do(req)
+//		if err != nil {
+//			logger.ProcLog.Error(err)
+//			c.JSON(http.StatusInternalServerError, gin.H{})
+//			return
+//		}
+//		defer func() {
+//			if closeErr := resp.Body.Close(); closeErr != nil {
+//				logger.ProcLog.Error(closeErr)
+//			}
+//		}()
+//
+//		// Filter by tenant.
+//		tenantId, err := GetTenantId(c)
+//		if err != nil {
+//			logger.ProcLog.Errorln(err.Error())
+//			c.JSON(http.StatusBadRequest, gin.H{
+//				"cause": "Illegal Token",
+//			})
+//			return
+//		}
+//
+//		if tenantId == "" {
+//			sendResponseToClient(c, resp)
+//		} else {
+//			sendResponseToClientFilterTenant(c, resp, tenantId)
+//		}
+//	} else {
+//		c.JSON(http.StatusInternalServerError, gin.H{
+//			"cause": "No AMF found. Is the core running?",
+//		})
+//	}
+//}
+
+func GetUeSessionContextByID(c *gin.Context) {
 	setCorsHeader(c)
 
-	logger.ProcLog.Infoln("Get UE PDU Session Info")
+	if !CheckAuth(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"cause": "Illegal Token"})
+		return
+	}
+
+	logger.ProcLog.Infoln("Get UE Session Context (PDU Session Info) From SMF")
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.ProcLog.Errorf("GetUeSessionContextByID err: unexpected server error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"cause": "Unexpected server error while getting PDU session context",
+			})
+			return
+		}
+	}()
 
 	webuiSelf := webui_context.GetSelf()
 	webuiSelf.UpdateNfProfiles()
@@ -1639,6 +2077,7 @@ func GetUEPDUSessionInfo(c *gin.Context) {
 	// TODO: support fetching data from multiple SMF
 	if smfUris := webuiSelf.GetOamUris(models.NfType_SMF); smfUris != nil {
 		requestUri := fmt.Sprintf("%s/nsmf-oam/v1/ue-pdu-session-info/%s", smfUris[0], smContextRef)
+
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestUri, nil)
 		if err != nil {
 			logger.ProcLog.Error(err)
@@ -1660,7 +2099,7 @@ func GetUEPDUSessionInfo(c *gin.Context) {
 		sendResponseToClient(c, resp)
 	} else {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"cause": "No SMF Found",
+			"cause": "No SMF found. Is the core running?",
 		})
 	}
 }

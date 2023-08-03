@@ -4,7 +4,6 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/gin-contrib/cors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/free5gc/util/mongoapi"
@@ -70,6 +69,7 @@ func (a *WebuiApp) SetReportCaller(reportCaller bool) {
 func (a *WebuiApp) Start(tlsKeyLogPath string) {
 	// get config file info from WebUIConfig
 	mongodb := factory.WebuiConfig.Configuration.Mongodb
+	webserver := factory.WebuiConfig.Configuration.Webserver
 
 	// Connect to MongoDB
 	if err := mongoapi.SetMongoDB(mongodb.Name, mongodb.Url); err != nil {
@@ -77,26 +77,22 @@ func (a *WebuiApp) Start(tlsKeyLogPath string) {
 		return
 	}
 
-	logger.InitLog.Infoln("Server started")
-
 	router := WebUI.NewRouter()
-
-	router.Use(cors.New(cors.Config{
-		AllowMethods: []string{"GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"},
-		AllowHeaders: []string{
-			"Origin", "Content-Length", "Content-Type", "User-Agent",
-			"Referrer", "Host", "Token", "X-Requested-With",
-		},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		AllowAllOrigins:  true,
-		MaxAge:           86400,
-	}))
+	WebUI.SetAdmin()
+	if err := WebUI.InitJwtKey(); err != nil {
+		logger.InitLog.Errorln(err)
+		return
+	}
 
 	self := webui_context.GetSelf()
 	self.UpdateNfProfiles()
 
-	router.NoRoute(ReturnPublic())
+	var url string
+	if webserver.Host == "localhost" {
+		url = ":" + webserver.Port
+	} else {
+		url = webserver.Scheme + "://" + webserver.Host + ":" + webserver.Port
+	}
 
-	logger.InitLog.Infoln(router.Run(":5000"))
+	logger.InitLog.Infoln(router.Run(url))
 }
