@@ -1,5 +1,5 @@
 import { useSelector, useDispatch } from 'react-redux';
-import Free5gcLogo from '../_assets/images/free5gc_logo.png';
+//import Free5gcLogo from '../_assets/images/free5gc_logo.png';
 import Nav from 'react-bootstrap/Nav';
 import { NavLink, useLocation } from 'react-router-dom';
 
@@ -19,13 +19,17 @@ function SideBar() {
   return (
     <div className="sidebar">
       <div className="brand">
-        <a href="https://free5gc.org" className="brand-name">
+        {/*<a href="https://free5gc.org" className="brand-name">
           <img src={Free5gcLogo} alt="logo" className="logo" />
-        </a>
+        </a>*/}
       </div>
 
       <div style={{ marginLeft: '20px' }}>
-        © 2023 <a href="https://free5gc.org">free5GC dev team</a>
+        © 2023 <a href="https://free5gc.org">Frontend for free5gc, developed by LaumiH</a>
+      </div>
+
+      <div style={{ marginLeft: '20px' }}>
+        This is NOT the official frontend
       </div>
 
       <div className="sidebar-wrapper">

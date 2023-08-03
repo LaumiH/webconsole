@@ -1,7 +1,7 @@
 {
   "name": "free5gc_webconsole",
   "version": "0.2.0",
-  "main": "index.jsx",
+  "main": "index.js",
   "private": true,
   "license": "Apache License 2.0",
   "dependencies": {
