@@ -73,7 +73,7 @@ function createExtraActions() {
     return createAsyncThunk(
       `${name}/updateSubscriberById`,
       async (subscriberData) => {
-        await fetchWrapper.put(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}`, subscriberData);
+        await fetchWrapper.put(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}/${subscriberData.userNumber}`, subscriberData);
       }
     );
   };
@@ -82,7 +82,7 @@ function createExtraActions() {
     return createAsyncThunk(
       `${name}/createSubscriberById`,
       async (subscriberData) => {
-        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}`, subscriberData);
+        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}/${subscriberData.userNumber}`, subscriberData);
       }
     );
   };

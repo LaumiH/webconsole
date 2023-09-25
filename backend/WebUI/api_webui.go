@@ -1311,6 +1311,7 @@ func PostSubscriberByID(c *gin.Context) {
 	servingPlmnId := c.Param("plmnId")
 	userNumber := c.Param("userNumber")
 	if userNumber == "" {
+		logger.ProcLog.Infoln("User number is empty, setting to 1")
 		userNumber = "1"
 	}
 	userNumberTemp, err := strconv.Atoi(userNumber)
@@ -1321,6 +1322,9 @@ func PostSubscriberByID(c *gin.Context) {
 		})
 		return
 	}
+
+	logger.ProcLog.Infof("User number is %d", userNumberTemp)
+
 	msisdn := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
 	msisdnTemp := 0
 	if msisdn != "" {
@@ -1383,6 +1387,7 @@ func PostSubscriberByID(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{})
 }
 
+/*
 // Post multiple subscribers by IMSI(ueId) and PlmnID(servingPlmnId)
 // PostMultipleSubscribersByID godoc
 // @Summary     CreateSubscriberByID
@@ -1522,6 +1527,7 @@ func PostMultipleSubscribersByID(c *gin.Context) {
 	}
 	c.JSON(http.StatusCreated, gin.H{})
 }
+*/
 
 func validate(supi string, msisdn string) bool {
 	filter := bson.M{"msisdn": msisdn}

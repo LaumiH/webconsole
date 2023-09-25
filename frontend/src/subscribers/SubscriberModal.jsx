@@ -167,8 +167,8 @@ function SubscriberModal(props) {
                         type="number"
                         {...register('userNumber', {
                           required: 'Please enter the number of subscribers you want to create simultaneously.',
-                          min: { value: 2, message: 'The number of subscribers must be between 2 and 20.' },
-                          max: { value: 20, message: 'The number of subscribers must be between 2 and 20.' },
+                          min: { value: 2, message: 'The number of subscribers must be between 2 and 100.' },
+                          max: { value: 100, message: 'The number of subscribers must be between 2 and 100.' },
                         })}
                         className={`form-control ${errors.userNumber ? 'is-invalid' : ''}`} />
                       <div className="invalid-feedback">{errors.userNumber?.message}</div>

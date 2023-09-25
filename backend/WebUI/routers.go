@@ -201,16 +201,18 @@ var apiEndpoints = Routes{
 	{
 		"PostSubscriberByID",
 		http.MethodPost,
-		"/subscribers/:supi/:plmnId",
+		"/subscribers/:supi/:plmnId/:userNumber",
 		PostSubscriberByID,
 	},
 
-	{
-		"PostMultipleSubscribersByID",
-		http.MethodPost,
-		"/subscribers/:supi/:plmnId/:userNumber",
-		PostMultipleSubscribersByID,
-	},
+	/*
+		{
+			"PostMultipleSubscribersByID",
+			http.MethodPost,
+			"/subscribers/:supi/:plmnId/:userNumber",
+			PostMultipleSubscribersByID,
+		},
+	*/
 
 	{
 		"PutSubscriberByID",
