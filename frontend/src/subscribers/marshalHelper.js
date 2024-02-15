@@ -248,6 +248,7 @@ function frontendToBackend(formData) {
   let subscriber = {
     plmnId: '' + formData.plmnId,
     supi: 'imsi-' + formData.supi,
+    userNumber: formData.userNumber ? formData.userNumber : 1,
     AuthenticationSubscription: {
       authenticationManagementField: formData.amf,
       authenticationMethod: formData.authMethod,

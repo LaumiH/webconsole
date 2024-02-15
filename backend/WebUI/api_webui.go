@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -1301,12 +1302,10 @@ func PostSubscriberByID(c *gin.Context) {
 	ueId := strings.Split(c.Param("supi"), "-")[1]
 	servingPlmnId := c.Param("plmnId")
 
-	userNumberTmp := c.Param("userNumber")
+	userNumberString := c.Param("userNumber")
 	userNumber := 1
-	if userNumberTmp == "" {
-		userNumber = 1
-	} else {
-		userNumber, err = strconv.Atoi(userNumberTmp)
+	if userNumberString != "" {
+		userNumber, err = strconv.Atoi(userNumberString)
 		if err != nil {
 			logger.ProcLog.Errorf("PostSubscriberByID err: %+v", err)
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -1316,10 +1315,10 @@ func PostSubscriberByID(c *gin.Context) {
 		}
 	}
 
-	msisdn := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
-	msisdnTemp := 0
-	if msisdn != "" {
-		msisdnTemp, err = strconv.Atoi(msisdn)
+	msisdnString := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
+	msisdn := 0
+	if msisdnString != "" {
+		msisdn, err = strconv.Atoi(msisdnString)
 		if err != nil {
 			logger.ProcLog.Errorf("PostSubscriberByID err: %+v", err)
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -1337,6 +1336,10 @@ func PostSubscriberByID(c *gin.Context) {
 		})
 		return
 	}
+
+	staticIPv4sPerDN := extractStaticIPv4s(subsData.SessionManagementSubscriptionData)
+
+	logger.ProcLog.Infof("Static IPs: %+v", staticIPv4sPerDN)
 
 	// check if static IPv4 address has already been configured for a UE in the same PLMN, slice and DN
 	/*
@@ -1366,39 +1369,65 @@ func PostSubscriberByID(c *gin.Context) {
 
 	for i := 0; i < userNumber; i++ {
 		ueId = fmt.Sprintf("imsi-%015d", ueIdTemp)
-		if msisdnTemp != 0 {
-			if !validateMsisdn(ueId, msisdn) {
-				logger.ProcLog.Errorf("duplicate msisdn: %v", msisdn)
+		if msisdnString != "" {
+			if !validateMsisdn(ueId, msisdnString) {
+				logger.ProcLog.Errorf("duplicate msisdn: %s", msisdnString)
 				c.JSON(http.StatusBadRequest, gin.H{
 					"cause": "duplicate msisdn",
 				})
 				return
 			}
-			msisdnTemp += 1
+
+			subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdnString
+
+			// create a msisdn-supi map
+			msisdnSupiMapOperation(ueId, msisdnString, "post")
+
+			msisdn += 1
+			msisdnString = strconv.Itoa(msisdn)
 		}
+
 		ueIdTemp += 1
 
-		existingIPv4, existingSlice, err := checkDuplicateStaticIPv4Address(servingPlmnId, subsData.SessionManagementSubscriptionData)
-		if err != nil {
-			logger.ProcLog.Errorf("Could not validate static UE IP address: %+v", err)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"cause": "static UE IP validation error",
-			})
-			return
+		if len(staticIPv4sPerDN) > 0 {
+			increasedStaticIPv4sPerDN := make(map[string][]string)
+			for dnn, ips := range staticIPv4sPerDN {
+				for _, smd := range subsData.SessionManagementSubscriptionData {
+					dn := smd.DnnConfigurations[dnn]
+					for _, ip := range ips {
+						dn.StaticIpAddress = []models.IpAddress{}
+						dn.StaticIpAddress = append(dn.StaticIpAddress, models.IpAddress{
+							Ipv4Addr: ip,
+						})
+						if userNumber > 1 {
+							//increase static IP address for next UE
+							newIP := increaseIPv4(ip)
+							logger.ProcLog.Infof("Increased static IP: %s", newIP)
+							increasedStaticIPv4sPerDN[dnn] = append(increasedStaticIPv4sPerDN[dnn], newIP)
+						}
+					}
+				}
+			}
+			staticIPv4sPerDN = increasedStaticIPv4sPerDN
 		}
 
-		if existingIPv4 != "" {
-			logger.ProcLog.Errorf("Duplicate static UE IP address %s, already exists in slice %+v", existingIPv4, existingSlice)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"cause": "duplicate static UE IP address",
-			})
-			return
-		}
+		//existingIPv4, existingSlice, err := checkDuplicateStaticIPv4Address(servingPlmnId, subsData.SessionManagementSubscriptionData)
+		//if err != nil {
+		//	logger.ProcLog.Errorf("Could not validate static UE IP address: %+v", err)
+		//	c.JSON(http.StatusBadRequest, gin.H{
+		//		"cause": "static UE IP validation error",
+		//	})
+		//	return
+		//}
+		//
+		//if existingIPv4 != "" {
+		//	logger.ProcLog.Errorf("Duplicate static UE IP address %s, already exists in slice %+v", existingIPv4, existingSlice)
+		//	c.JSON(http.StatusBadRequest, gin.H{
+		//		"cause": "duplicate static UE IP address",
+		//	})
+		//	return
+		//}
 
-		subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdn
-		// create a msisdn-supi map
-		logger.ProcLog.Infof("PostSubscriberByID msisdn: %+v", msisdn)
-		msisdnSupiMapOperation(ueId, msisdn, "post")
 		filterUeIdOnly := bson.M{"ueId": ueId}
 
 		// Lookup same UE ID of other tenant's subscription.
@@ -1418,6 +1447,7 @@ func PostSubscriberByID(c *gin.Context) {
 		}
 		dbOperation(ueId, servingPlmnId, "post", &subsData, claims)
 	}
+
 	c.JSON(http.StatusCreated, gin.H{})
 }
 
@@ -1434,7 +1464,7 @@ func PostSubscriberByID(c *gin.Context) {
 // @Success      201 "Create subscription success"
 // @Failure 400 {object} HTTPError "JSON format incorrect"
 // @Router  /subscriber/{ueId}/{servingPlmnId}/{userNumber} [post]
-func PostMultipleSubscribersByID(c *gin.Context) {
+/*func PostMultipleSubscribersByID(c *gin.Context) {
 	setCorsHeader(c)
 
 	if !CheckAuth(c) {
@@ -1480,15 +1510,15 @@ func PostMultipleSubscribersByID(c *gin.Context) {
 	}
 	ueId := strings.Split(c.Param("supi"), "-")[1]
 	servingPlmnId := c.Param("plmnId")
-	userNumber := c.Param("userNumber")
-	if userNumber == "" {
+	userNumberString := c.Param("userNumber")
+	if userNumberString == "" {
 		logger.ProcLog.Errorln("PostMultipleSubscribersByID err: user number is empty")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"cause": "userNumber empty",
 		})
 		return
 	}
-	userNumberTemp, err := strconv.Atoi(userNumber)
+	userNumber, err := strconv.Atoi(userNumberString)
 	if err != nil {
 		logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1496,12 +1526,13 @@ func PostMultipleSubscribersByID(c *gin.Context) {
 		})
 		return
 	}
-	msisdn := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
-	msisdnTemp := 0
-	if msisdn != "" {
-		msisdnTemp, err = strconv.Atoi(msisdn)
+
+	msisdnString := getMsisdn(toBsonM(subsData.AccessAndMobilitySubscriptionData)["gpsis"])
+	msisdn := 0
+	if msisdnString != "" {
+		msisdn, err = strconv.Atoi(msisdnString)
 		if err != nil {
-			logger.ProcLog.Errorf("PostMultipleSubscribersByID err: %+v", err)
+			logger.ProcLog.Errorf("PostSubscriberByID err: %+v", err)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"cause": "msisdn format incorrect",
 			})
@@ -1518,24 +1549,48 @@ func PostMultipleSubscribersByID(c *gin.Context) {
 		return
 	}
 
-	for i := 0; i < userNumberTemp; i++ {
+	staticIPv4sPerDN := extractStaticIPv4s(subsData.SessionManagementSubscriptionData)
+
+	for i := 0; i < userNumber; i++ {
 		ueId = fmt.Sprintf("imsi-%015d", ueIdTemp)
-		if msisdnTemp != 0 {
-			if !validateMsisdn(ueId, msisdn) {
-				logger.ProcLog.Errorf("duplicate msisdn: %v", msisdn)
+		if msisdnString != "" {
+			if !validateMsisdn(ueId, msisdnString) {
+				logger.ProcLog.Errorf("duplicate msisdn: %s", msisdnString)
 				c.JSON(http.StatusBadRequest, gin.H{
 					"cause": "duplicate msisdn",
 				})
 				return
 			}
-			//msisdnTemp += 1
-		}
-		//ueIdTemp += 1
 
-		subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdn
+			subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdnString
+
+			// create a msisdn-supi map
+			msisdnSupiMapOperation(ueId, msisdnString, "post")
+
+			msisdn += 1
+			msisdnString = strconv.Itoa(msisdn)
+		}
+
+		if len(staticIPv4sPerDN) > 0 {
+			for dnn, ips := range staticIPv4sPerDN {
+				for _, smd := range subsData.SessionManagementSubscriptionData {
+					dn := smd.DnnConfigurations[dnn]
+					for x, ip := range ips {
+						dn.StaticIpAddress = []models.IpAddress{}
+						dn.StaticIpAddress = append(dn.StaticIpAddress, models.IpAddress{
+							Ipv4Addr: ip,
+						})
+						//increase static IP address for next UE
+						staticIPv4sPerDN[dnn][x] = increaseIPv4(ip)
+					}
+				}
+			}
+		}
+
+		subsData.AccessAndMobilitySubscriptionData.Gpsis[0] = "msisdn-" + msisdnString
 		// create a msisdn-supi map
-		logger.ProcLog.Infof("PostMultipleSubscribersByID msisdn: %+v", msisdn)
-		msisdnSupiMapOperation(ueId, msisdn, "post")
+		logger.ProcLog.Infof("PostMultipleSubscribersByID msisdn: %d", msisdn)
+		msisdnSupiMapOperation(ueId, msisdnString, "post")
 		filterUeIdOnly := bson.M{"ueId": ueId}
 
 		// Lookup same UE ID of other tenant's subscription.
@@ -1554,12 +1609,9 @@ func PostMultipleSubscribersByID(c *gin.Context) {
 			}
 		}
 		dbOperation(ueId, servingPlmnId, "post", &subsData, claims)
-
-		msisdn = strconv.Itoa(msisdnTemp + 1)
-		ueIdTemp += 1
 	}
 	c.JSON(http.StatusCreated, gin.H{})
-}
+}*/
 
 func validateMsisdn(supi string, msisdn string) bool {
 	filter := bson.M{"msisdn": msisdn}
@@ -1590,6 +1642,36 @@ func msisdnSupiMapOperation(supi string, msisdn string, method string) {
 			logger.ProcLog.Errorf("DeleteMsisdnSupiMap err: %+v", err)
 		}
 	}
+}
+
+func extractStaticIPv4s(sessSubData []models.SessionManagementSubscriptionData) (ips map[string][]string) {
+	ips = make(map[string][]string)
+	for _, sub := range sessSubData {
+		for dnn, dnConf := range sub.DnnConfigurations {
+			for _, ipAddr := range dnConf.StaticIpAddress {
+				ips[dnn] = append(ips[dnn], ipAddr.Ipv4Addr)
+			}
+		}
+	}
+	return
+}
+
+func increaseIPv4(ipv4Addr string) string {
+	parts := strings.Split(ipv4Addr, "/")
+	ipStr, subnet := parts[0], parts[1]
+	ip := net.ParseIP(ipStr)
+	ip4 := ip.To4()
+	// Convert 4-byte IP to an integer
+	ipInt := uint32(ip4[0])<<24 + uint32(ip4[1])<<16 + uint32(ip4[2])<<8 + uint32(ip4[3])
+
+	// Increment the IP address
+	ipInt++
+
+	// Convert the incremented integer back to an IP address
+	incrementedIP := net.IPv4(byte(ipInt>>24), byte(ipInt>>16&0xFF), byte(ipInt>>8&0xFF), byte(ipInt&0xFF))
+
+	// Reassemble and return the incremented IP address with its subnet mask
+	return incrementedIP.String() + "/" + subnet
 }
 
 func checkDuplicateStaticIPv4Address(servingPlmnId string, sessSubData []models.SessionManagementSubscriptionData) (string, *StaticIPSlice, error) {

@@ -95,6 +95,8 @@ function Subscribers() {
 
             {error && <div className="text-danger" style={{ marginLeft: '30px', paddingBottom: '30px' }}>Error in subscriber action: {error.message}</div>}
 
+            {error && console.log(error)}
+
             <div style={{ display: 'flex', float: 'right', flexDirection: 'row' }}>
               <Button variant="primary"
                 style={{ marginLeft: '30px', width: '130px' }}

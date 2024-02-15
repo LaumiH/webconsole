@@ -162,13 +162,15 @@ function SubscriberModal(props) {
     // Check if the startIPv4 field is currently valid
     getValues('slices').flatMap((slice, sliceIndex) => {
       return slice.dnns.map((dn, dnIndex) => {
-        let [ip, subnetSize] = `slices.${sliceIndex}.dnns.${dnIndex}.startIPv4`.split('/');
-        let end = incrementIP(ip.split('.'), ueNum);
-        setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end.join('.') + '/' + subnetSize);
+        if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && dn.staticIPv4.includes('/') && ueNum > 0) {
+          let [ip, subnetSize] = dn.staticIPv4.split('/');
+          let end = incrementIP(ip.split('.'), ueNum);
+          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end.join('.') + '/' + subnetSize);
+        }
         return ''
       })
     })
-  }, [ueNum, calculateEndIPv4Address, getValues, setValue]); // Make sure to include all dependencies
+  }, [ueNum, calculateEndIPv4Address, getValues, setValue, errors?.slices]); // Make sure to include all dependencies
 
   return (
     <Modal show={props.show} onHide={() => {
@@ -225,7 +227,7 @@ function SubscriberModal(props) {
                       <label>Number of subscribers to create simultaneously (auto-increased MSIN)</label>
                       <input
                         name="userNumber"
-                        defaultValue={2}
+                        defaultValue={1}
                         type="number"
                         {...register('userNumber', {
                           required: 'Please enter the number of subscribers you want to create simultaneously.',
@@ -247,6 +249,8 @@ function SubscriberModal(props) {
                               setValue(`slices.${sliceIndex}.dnns.${dnIndex}.checkStaticIPv4`, e.target.checked);
                               if (e.target.checked === false) {
                                 unregister(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`);
+                                unregister(`slices.${sliceIndex}.dnns.${dnIndex}.startIPv4`);
+                                unregister(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`);
                               }
                               return ''
                             })
@@ -272,10 +276,13 @@ function SubscriberModal(props) {
                                     })}
                                     onInput={(e) => {
                                       setValue(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`, e.target.value);
-                                      if (!`errors.slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4` && `slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4` && `slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`.includes('/') && ueNum > 0) {
-                                        let [ip, subnetSize] = `slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`.split('/');
-                                        let end = incrementIP(ip.split('.'), ueNum);
-                                        setValue('endIPv4', end.join('.') + '/' + subnetSize);
+                                      if (e.target.value.includes('/')) {
+                                        trigger(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`)
+                                        if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && ueNum > 0) {
+                                          let [ip, subnetSize] = e.target.value.split('/');
+                                          let end = incrementIP(ip.split('.'), ueNum);
+                                          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end.join('.') + '/' + subnetSize);
+                                        }
                                       }
                                     }}
                                     className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 ? 'is-invalid' : ''}`} />

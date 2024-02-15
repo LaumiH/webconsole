@@ -83,7 +83,7 @@ function createExtraActions() {
     return createAsyncThunk(
       `${name}/createSubscriberById`,
       async (subscriberData) => {
-        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}`, subscriberData);
+        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}/${subscriberData.userNumber}`, subscriberData);
       }
     );
   };
