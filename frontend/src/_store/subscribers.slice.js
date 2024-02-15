@@ -29,6 +29,7 @@ function createInitialState() {
 // for all actions that require thunk, aka are async
 function createExtraActions() {
   const baseUrl = `${process.env.REACT_APP_API_URL}/subscribers`;
+  console.log(baseUrl)
 
   return {
     getAllSubscribers: getAllSubscribers(),

@@ -4,13 +4,12 @@ import { useFieldArray } from 'react-hook-form';
 
 export { SlicesArray };
 
-function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
-  const { fields, remove, append } = useFieldArray({
+function DNNConfigArray({ nestIndex, control, register, errors, watch, getValues, setValue, unregister }) {
+  const { fields, append, remove } = useFieldArray({
     control,
     name: `slices.${nestIndex}.dnns`,
     rules: {
       required: 'Please add at least one data network to this slice.',
-      minLength: { value: 1, message: 'A slice must have at least one DNN.' }
     }
   });
 
@@ -19,12 +18,14 @@ function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
       <h5>Data Network Configuration</h5>
       <Button variant="secondary" className="add-button" onClick={() => append({
         name: 'internet',
+        checkStaticIPv4: false,
+        staticIPv4: '',
         uplinkAmbr: '1 Mbps',
         downlinkAmbr: '1 Mbps',
         default5qi: 9,
         flows: [
           {
-            filter: '0.0.0.0/0',
+            filter: '',
             precedence: 128,
             fiveQi: 9,
             gbrUL: '100 Mbps',
@@ -38,7 +39,7 @@ function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
       </Button>
 
       <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.[nestIndex]?.dnns?.root?.message}</div>
-      {/*Note: this only works whhen 'display: none' is NOT in the style, which the invalid-feedback class unfortunately has, hence the inline style!*/}
+      {/*Note: this only works when 'display: none' is NOT in the style, which the invalid-feedback class unfortunately has, hence the inline style!*/}
       {fields.map((item, k) => {
         return (
           <div
@@ -62,6 +63,35 @@ function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
                 className={`form-control ${errors.slices?.[nestIndex]?.dnns?.[k]?.name ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[nestIndex]?.dnns?.[k]?.name?.message}</div>
             </div>
+
+            <div className="form-group">
+              <label>Configure Static IPv4 Address for DN [{getValues(`slices.${nestIndex}.dnns.${k}.name`)}]</label>
+              <input
+                name={`slices.${nestIndex}.dnns.${k}.checkStaticIPv4`}
+                {...register(`slices.${nestIndex}.dnns.${k}.checkStaticIPv4`)}
+                type="checkbox"
+                disabled={getValues('multisubs') === true}
+                onClick={(e) => {
+                  if (e.target.checked) {
+                    unregister(`slices.${nestIndex}.dnns.${k}.staticIPv4`);
+                  }
+                }} />
+            </div>
+            {(watch(`slices.${nestIndex}.dnns.${k}.checkStaticIPv4`) === true) &&
+              <div className="form-group">
+                <label>Static IPv4 Address</label>
+                <input
+                  name={`slices.${nestIndex}.dnns.${k}.staticIPv4`}
+                  type="text"
+                  readOnly={getValues('multisubs') === true}
+                  placeholder={getValues('multisubs') === true ? 'edit in multiple subscribers config above' : ''}
+                  {...register(`slices.${nestIndex}.dnns.${k}.staticIPv4`, {
+                    pattern: { value: /^$|^(?:[0-9]{1,3}\.){3}[0-9]{1,3}\/([1-9]|[12][0-9]|3[01])$/, message: 'The static IPv4 address must be in CIDR notation (e.g. 10.60.0.1/24).' }
+                  })}
+                  className={`form-control ${errors.slices?.[nestIndex]?.dnns?.[k].staticIPv4 ? 'is-invalid' : ''}`} />
+                <div className="invalid-feedback">{errors.slices?.[nestIndex]?.dnns?.[k].staticIPv4?.message}</div>
+              </div>
+            }
 
             <div className="form-group">
               <label>Uplink AMBR</label>
@@ -111,7 +141,7 @@ function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
                 type="checkbox" />
             </div>
 
-            {watch(`slices.${nestIndex}.dnns.${k}.upSecurity`) &&
+            {(watch(`slices.${nestIndex}.dnns.${k}.upSecurity`) === true) &&
               <div>
                 <h5>UP Security Configuration</h5>
                 <div className="form-group">
@@ -137,7 +167,7 @@ function DNNConfigArray({ nestIndex, control, register, errors, watch }) {
               </div>
             }
 
-            <FlowConfigArray sliceIndex={nestIndex} nestIndex={k} {...{ control, register, errors }} />
+            <FlowConfigArray sliceIndex={nestIndex} nestIndex={k} {...{ control, register, errors, watch }} />
           </div>
         );
       })}
@@ -155,7 +185,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
     <div className="flow-block">
       <h5>Flow Configuration</h5>
       <Button variant="secondary" className="add-button" onClick={() => append({
-        filter: '0.0.0.0/0',
+        filter: '',
         precedence: 128,
         fiveQi: 9,
         gbrUL: '100 Mbps',
@@ -165,6 +195,9 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
       })} >
         Add
       </Button>
+
+      <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.root?.message}</div>
+      {/*Note: this only works when 'display: none' is NOT in the style, which the invalid-feedback class unfortunately has, hence the inline style!*/}
 
       {fields.map((item, k) => {
         return (
@@ -184,11 +217,12 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                 type="text"
                 name={`slices.${sliceIndex}.dnns.${nestIndex}.flows.${k}.filter`}
                 {...register(`slices.${sliceIndex}.dnns.${nestIndex}.flows.${k}.filter`, {
-                  required: 'Please enter an IP filter.',
+                  //required: 'Please enter an IP filter.',
                   //TODO: what does such a filter look like?
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.filter ? 'is-invalid' : ''}`} />
-              <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.filter?.message}</div>
+                //className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.filter ? 'is-invalid' : ''}`} />
+                className={`form-control`} />
+              {/*<div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.filter?.message}</div>*/}
             </div>
 
             <div className="form-group">
@@ -201,7 +235,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   min: { value: 1, message: 'The precedence must be between 1 and 256.' },
                   max: { value: 256, message: 'The precedence must be between 1 and 256.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.precedence ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.precedence ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.precedence?.message}</div>
             </div>
 
@@ -215,7 +249,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   min: { value: 0, message: 'The 5QI must be between 0 and 255.' },
                   max: { value: 255, message: 'The 5QI must be between 0 and 255.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.fiveQi ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.fiveQi ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.fiveQi?.message}</div>
             </div>
 
@@ -228,7 +262,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   required: 'Please enter a UL GBR.',
                   pattern: { value: /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, message: 'The UL GBR must have the form /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, e.g. \'1.0 Gbps\'.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.gbrUL ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.gbrUL ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.gbrUL?.message}</div>
             </div>
 
@@ -241,7 +275,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   required: 'Please enter a DL GBR.',
                   pattern: { value: /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, message: 'The DL GBR must have the form /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, e.g. \'1.0 Gbps\'.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.gbrDL ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.gbrDL ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.gbrDL?.message}</div>
             </div>
 
@@ -254,7 +288,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   required: 'Please enter a UL MBR.',
                   pattern: { value: /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, message: 'The UL MBR must have the form /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, e.g. \'1.0 Gbps\'.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.mbrUL ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.mbrUL ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.mbrUL?.message}</div>
             </div>
 
@@ -267,7 +301,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                   required: 'Please enter a DL MBR.',
                   pattern: { value: /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, message: 'The DL MBR must have the form /^[0-9]+(\\.[0-9]+)? (bps|Kbps|Mbps|Gbps|Tbps)$/, e.g. \'1.0 Gbps\'.' }
                 })}
-                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.mbrDL ? 'is-invalid' : ''}`} />
+                className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.mbrDL ? 'is-invalid' : ''}`} />
               <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[nestIndex]?.flows?.[k]?.mbrDL?.message}</div>
             </div>
 
@@ -278,13 +312,13 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
   );
 };
 
-function SlicesArray({ control, register, errors, watch }) {
+function SlicesArray({ control, register, errors, watch, unregister, getValues, setValue }) {
   const { fields, append, remove } = useFieldArray({
     control,
     name: 'slices',
     rules: {
       required: 'Please add at least one slice.',
-      minLength: { value: 1, message: 'A subscriber must have at least one supported slice.' }
+      //minLength: { value: 1, message: 'A subscriber must have at least one supported slice.' }
     }
   });
 
@@ -292,46 +326,57 @@ function SlicesArray({ control, register, errors, watch }) {
     <div>
       <div style={{ display: 'flex' }}>
         <h3>Slice Configuration (S-NSSAI)</h3>
-        <Button variant="primary" className="add-button" onClick={() => append({
-          sst: 1,
-          sd: '010203',
-          isDefault: true,
-          dnns: [
-            {
-              name: 'internet',
-              uplinkAmbr: '1 Mbps',
-              downlinkAmbr: '1 Mbps',
-              default5qi: 9,
-              flows: [
-                {
-                  filter: '0.0.0.0/0',
-                  precedence: 128,
-                  fiveQi: 9,
-                  gbrUL: '100 Mbps',
-                  gbrDL: '100 Mbps',
-                  mbrUL: '1 Gbps',
-                  mbrDL: '1 Gbps'
-                }
-              ]
-            }
-          ]
-        })} >
+        <Button variant="primary" className="add-button" onClick={() => {
+          append({
+            sst: 1,
+            sd: '010203',
+            isDefault: true,
+            dnns: [
+              {
+                name: 'internet',
+                checkStaticIPv4: false,
+                staticIPv4: '',
+                uplinkAmbr: '1 Mbps',
+                downlinkAmbr: '1 Mbps',
+                default5qi: 9,
+                flows: [
+                  {
+                    filter: '',
+                    precedence: 128,
+                    fiveQi: 9,
+                    gbrUL: '100 Mbps',
+                    gbrDL: '100 Mbps',
+                    mbrUL: '1 Gbps',
+                    mbrDL: '1 Gbps'
+                  }
+                ]
+              }
+            ]
+          });
+          //errors.slices = []; // need to reset the errors, otherwise the nested field arrays will retain errors
+        }} >
           Add
         </Button>
       </div>
 
-      <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.root?.message}</div> {/*Note: this only works whhen 'display: none' is NOT in the style, which the invalid-feedback class unfortunately has, hence the inline style!*/}
+      <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.root?.message}</div>
+      {/*Note: this only works when 'display: none' is NOT in the style, which the invalid-feedback class unfortunately has, hence the inline style!*/}
+      <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.[0]?.dnns?.root?.message}</div>
+      <div style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.875em', color: '#dc3545' }}>{errors.slices?.[1]?.dnns?.root?.message}</div>
+      {fields.map((item, index) => (
+        <div key={item.id}>
+          <div className="slice-block">
+            <h4>Slice {index}</h4>
 
-      {fields.map((item, index) => {
-        return (
-          <div key={item.id}>
-            <div className="slice-block">
-              <h4>Slice {index}</h4>
+            <Button variant="danger" onClick={() => {
+              remove(index);
+              // FIXME: while this does remove the slice, validation at submission still returns the error for the non-existent slice! this is a known issue apparently ...
+            }} >
+              Remove
+            </Button>
 
-              <Button variant="danger" onClick={() => remove(index)} >
-                Remove
-              </Button>
 
+            <div style={{ display: 'flex', gap: '30px', alignItems: 'center', flexDirection: 'row' }}>
               <div className="form-group">
                 <label>SST</label>
 
@@ -359,21 +404,21 @@ function SlicesArray({ control, register, errors, watch }) {
                   className={`form-control ${errors.slices?.[index]?.sd ? 'is-invalid' : ''}`} />
                 <div className="invalid-feedback">{errors.slices?.[index]?.sd?.message}</div>
               </div>
-
-              <div className="form-group">
-                <label>Is default</label>
-                <input
-                  name={`slices.${index}isDefault`}
-                  {...register(`slices.${index}.isDefault`)}
-                  type="checkbox" />
-              </div>
-
-              <DNNConfigArray nestIndex={index} {...{ control, register, errors, watch }} />
-
             </div>
+
+            <div className="form-group">
+              <label>Is default</label>
+              <input
+                name={`slices.${index}isDefault`}
+                {...register(`slices.${index}.isDefault`)}
+                type="checkbox" />
+            </div>
+
+            <DNNConfigArray nestIndex={index} {...{ control, register, errors, watch, getValues, setValue, unregister }} />
+
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 };

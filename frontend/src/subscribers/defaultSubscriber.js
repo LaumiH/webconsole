@@ -20,6 +20,8 @@ let defaultSubscriber = {
       dnns: [
         {
           name: 'internet',
+          checkStaticIPv4: false,
+          staticIPv4: '',
           uplinkAmbr: '1 Tbps',
           downlinkAmbr: '1 Tbps',
           default5qi: 2,
@@ -28,7 +30,7 @@ let defaultSubscriber = {
           upSecurity: true,
           flows: [
             {
-              filter: '0ab',
+              filter: '',
               precedence: 120,
               fiveQi: 5,
               gbrUL: '1 Tbps',
@@ -40,19 +42,21 @@ let defaultSubscriber = {
         }
       ],
     },
-    {
+    /*{
       sst: 2,
       sd: '112233',
       isDefault: true,
       dnns: [
         {
           name: 'internet2',
+          checkStaticIPv4: false,
+          staticIPv4: '',
           uplinkAmbr: '1 Kbps',
           downlinkAmbr: '1 Kbps',
           default5qi: 10,
           flows: [
             {
-              filter: 'hi',
+              filter: '',
               precedence: 127,
               fiveQi: 11,
               gbrUL: '2 Tbps',
@@ -63,7 +67,7 @@ let defaultSubscriber = {
           ]
         }
       ],
-    }
+    }*/
   ]
 };
 

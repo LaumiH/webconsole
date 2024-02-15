@@ -85,17 +85,18 @@ function backendToFrontend(backend) {
         }
       });
 
-      let staticIps = '';
+      let staticIPv4 = '';
       const staticIpAddress = dnnConfigs[dnn].staticIpAddress;
       if (staticIpAddress && staticIpAddress.length !== 0) {
-        staticIps += staticIpAddress.reduce((total, element) => {
+        staticIPv4 += staticIpAddress.reduce((total, element) => {
           return total + element['ipv4Addr']
         }, '')
       }
 
       let dnnConfig = {
         name: dnn,
-        staticIP: staticIps,
+        checkStaticIPv4: staticIPv4.length !== 0,
+        staticIPv4: staticIPv4,
         uplinkAmbr: dnnConfigs[dnn].sessionAmbr.uplink,
         downlinkAmbr: dnnConfigs[dnn].sessionAmbr.downlink,
         default5qi: _.get(dnnConfigs, `${dnn}.5gQosProfile.5qi`),
@@ -131,6 +132,7 @@ function backendToFrontend(backend) {
     msin: parseInt(supi.replace('imsi-', '').replace(plmnId, '')),
     msisdn: msisdn,
     key: _.get(backend, 'AuthenticationSubscription.permanentKey.permanentKeyValue'),
+    amf: _.get(backend, 'AuthenticationSubscription.authenticationManagementField'),
     sqn: _.get(backend, 'AuthenticationSubscription.sequenceNumber'),
     opCodeType: opCode !== '' ? 'OP' : 'OPc',
     opCode: opCode !== '' ? opCode : _.get(backend, 'AuthenticationSubscription.opc.opcValue'),
@@ -159,7 +161,7 @@ function smDatasFromSliceConfiguration(slices) {
   })
 }
 
-function dnnConfigurationFromSliceConfiguration({ upSecurity, uplinkAmbr, downlinkAmbr, default5qi, upIntegrity, upConfidentiality }) {
+function dnnConfigurationFromSliceConfiguration({ upSecurity, uplinkAmbr, downlinkAmbr, default5qi, upIntegrity, upConfidentiality, checkStaticIPv4, staticIPv4 }) {
   let dnnConfig = {
     sscModes: {
       defaultSscMode: 'SSC_MODE_1',
@@ -191,10 +193,11 @@ function dnnConfigurationFromSliceConfiguration({ upSecurity, uplinkAmbr, downli
     }
   }
 
-  if (dnnConfig.staticIP !== undefined && dnnConfig.staticIP.length !== 0) {
+  // if existing, add static IPv4 address to SessionManagementSubscriptionData
+  if (checkStaticIPv4 && staticIPv4 !== undefined && staticIPv4.length !== 0) {
     dnnConfig.staticIpAddress = [
       {
-        'ipv4Addr': dnnConfig.staticIP
+        'ipv4Addr': staticIPv4
       }
     ]
   }

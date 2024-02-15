@@ -8,8 +8,8 @@ export { InfoHeader };
 // the header for various pages, containing an automatic refresh functionality
 function InfoHeader({ refreshAction, headline }) {
   const dispatch = useDispatch();
-  const [ time, setTime ] = useState(Date.now());
-  const [ refreshInterval, setRefreshInterval ] = useState(0);
+  const [time, setTime] = useState(Date.now());
+  const [refreshInterval, setRefreshInterval] = useState(0);
 
   // execute every time the refreshInterval changes to set the interval correctly
   // update the time value every x ms, which triggers refresh (see below)
@@ -20,13 +20,15 @@ function InfoHeader({ refreshAction, headline }) {
     return () => {
       clearInterval(interval);
     };
-  }, [ refreshInterval ]);
+  }, [refreshInterval]);
 
   // refresh every time the 'time' value changes
   useEffect(() => {
     dispatch(refreshAction());
     // eslint-disable-next-line
-  }, [ time, dispatch ]);
+  }, [time, dispatch]);
+
+  
 
   return (
     <div className="header subscribers__header">
