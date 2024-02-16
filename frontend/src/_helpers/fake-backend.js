@@ -8,7 +8,7 @@ function fakeBackend() {
     return new Promise((resolve, reject) => {
       // wrap in timeout to simulate server api call
       //setTimeout(replaceWithFakeCalls, 200);
-      replaceWithFakeCalls();
+      //replaceWithFakeCalls();
 
       function replaceWithFakeCalls() {
         switch (true) {

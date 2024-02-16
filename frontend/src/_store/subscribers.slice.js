@@ -29,6 +29,7 @@ function createInitialState() {
 // for all actions that require thunk, aka are async
 function createExtraActions() {
   const baseUrl = `${process.env.REACT_APP_API_URL}/subscribers`;
+  console.log(baseUrl)
 
   return {
     getAllSubscribers: getAllSubscribers(),
@@ -82,7 +83,7 @@ function createExtraActions() {
     return createAsyncThunk(
       `${name}/createSubscriberById`,
       async (subscriberData) => {
-        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}`, subscriberData);
+        await fetchWrapper.post(`${baseUrl}/${subscriberData.supi}/${subscriberData.plmnId}/${subscriberData.userNumber}`, subscriberData);
       }
     );
   };

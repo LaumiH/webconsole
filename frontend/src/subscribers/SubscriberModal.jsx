@@ -1,11 +1,11 @@
 import Modal from 'react-bootstrap/Modal';
 import { useSelector } from 'react-redux';
 import { useForm } from "react-hook-form";
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { SlicesArray } from './SlicesArray';
 import _ from 'lodash';
 import { useState } from 'react';
-import { backendToFrontend, frontendToBackend } from './marshalHelper';
+import { backendToFrontend, frontendToBackend, incrementIP, ipToInteger, integerToIp } from './marshalHelper';
 import { Button } from 'react-bootstrap';
 import { store, subscribersActions } from '../_store';
 import { defaultSubscriber } from './defaultSubscriber';
@@ -20,7 +20,7 @@ function SubscriberModal(props) {
   };
 
   // get functions to build form with useForm() hook
-  const { register, handleSubmit, formState, setValue, getValues, control, reset, watch } = useForm(formOptions);
+  const { register, unregister, handleSubmit, formState, setValue, getValues, control, reset, watch, trigger } = useForm(formOptions);
   const { errors, isSubmitting } = formState;
 
   const [supiReadOnly, setSupiReadOnly] = useState(true);
@@ -29,9 +29,9 @@ function SubscriberModal(props) {
   // set the detailed subscriber data
   useEffect(() => {
     if (!_.isEmpty(detailedSubscriber) && !detailedSubscriber.loading) {
-      reset(backendToFrontend(detailedSubscriber));
+      reset(backendToFrontend(detailedSubscriber, props.duplicateSubscriber));
     }
-  }, [detailedSubscriber, reset]);
+  }, [detailedSubscriber, props.duplicateSubscriber, reset]);
 
   const onSubmit = async (data, e) => {
     // prevent browser from reloading, as we do that with our change in the subscribers list
@@ -50,7 +50,7 @@ function SubscriberModal(props) {
     //let previousMsisdn = _.get(detailedSubscriber, 'AccessAndMobilitySubscriptionData.gpsis')?.filter(gpsi => gpsi.includes('msisdn-'))[0];
     let newMsisdn = _.get(marshalledData, 'AccessAndMobilitySubscriptionData.gpsis')?.filter(gpsi => gpsi.includes('msisdn-'))[0];
 
-    // A susbcriber cannot be created if it has the same SUPI and PLMN ID an as the duplicated one
+    // A susbcriber cannot be created if it has the same SUPI and PLMN ID as the duplicated one
     if (props.duplicateSubscriber
       && _.isEqual(previousSupi, newSupi)
       && _.isEqual(previousPlmnId, newPlmnId)) {
@@ -116,6 +116,39 @@ function SubscriberModal(props) {
     }
   };
 
+  //const startIPv4 = watch('startIPv4');
+  const ueNum = watch('userNumber');
+
+  //const calculateEndIPv4Address = useCallback((startIPv4, ueNum) => {
+  //  let [ip, subnetSize] = startIPv4.split('/');
+  //  let startIpInt = ipToInteger(ip);
+  //  let lastIpInt = (startIpInt + ueNum - 1) >>> 0;
+  //  return [ip, integerToIp(lastIpInt)];
+  //}, []);
+
+  // Effect hook to perform an action when startIPv4 changes and is valid
+  useEffect(() => {
+    // Check if the startIPv4 field is currently valid
+    getValues('slices').flatMap((slice, sliceIndex) => {
+      return slice.dnns.map((dn, dnIndex) => {
+        if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && dn.staticIPv4.includes('/') && ueNum > 0) {
+          let [ip, subnetSize] = dn.staticIPv4.split('/');
+          let end = incrementIP(ip, ueNum);
+          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end + '/' + subnetSize);
+        }
+        return ''
+      })
+    })
+  }, [ueNum, getValues, setValue, errors?.slices]); // Make sure to include all dependencies
+
+  //useEffect(() => {
+  //  if (props.duplicateSubscriber === true && !detailedSubscriber.loading) {
+  //    console.log('msin will be set to ', detailedSubscriber.msin+1);
+  //    setValue('msin', detailedSubscriber.msin+1);
+  //    console.log(detailedSubscriber);
+  //  }
+  //}, [detailedSubscriber.msin, props.duplicateSubscriber, setValue]);
+
   return (
     <Modal show={props.show} onHide={() => {
       reset(defaultSubscriber);
@@ -146,6 +179,12 @@ function SubscriberModal(props) {
               frontendToBackend(getValues());
             }}>
               Log backend data (TODO: remove)
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => {
+              console.log(getValues());
+              console.log('errors: ', errors);
+            }}>
+              Log frontend data (TODO: remove)
           </button>*/}
 
             {(props.newSubscriber || props.duplicateSubscriber) &&
@@ -158,21 +197,89 @@ function SubscriberModal(props) {
                     type="checkbox" />
                 </div>
 
-                {watch('multisubs') &&
+                {(watch('multisubs') === true) &&
                   <div>
+                    {/*<div style={{ display: 'flex', float: 'right', flexDirection: 'row' }}>*/}
                     <div className="form-group">
                       <label>Number of subscribers to create simultaneously (auto-increased MSIN)</label>
                       <input
                         name="userNumber"
+                        defaultValue={1}
                         type="number"
                         {...register('userNumber', {
                           required: 'Please enter the number of subscribers you want to create simultaneously.',
-                          min: { value: 2, message: 'The number of subscribers must be between 2 and 20.' },
-                          max: { value: 20, message: 'The number of subscribers must be between 2 and 20.' },
+                          min: { value: 2, message: 'The number of subscribers must be between 2 and 200.' },
+                          max: { value: 200, message: 'The number of subscribers must be between 2 and 200.' },
                         })}
                         className={`form-control ${errors.userNumber ? 'is-invalid' : ''}`} />
                       <div className="invalid-feedback">{errors.userNumber?.message}</div>
                     </div>
+                    <div className="form-group">
+                      <label>Assign auto-increased static UE IPs</label>
+                      <input
+                        name={'multiips'}
+                        {...register('multiips')}
+                        type="checkbox"
+                        onClick={(e) => {
+                          getValues('slices').flatMap((slice, sliceIndex) => {
+                            return slice.dnns.map((dn, dnIndex) => {
+                              setValue(`slices.${sliceIndex}.dnns.${dnIndex}.checkStaticIPv4`, e.target.checked);
+                              if (e.target.checked === false) {
+                                unregister(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`);
+                                unregister(`slices.${sliceIndex}.dnns.${dnIndex}.startIPv4`);
+                                unregister(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`);
+                              }
+                              return ''
+                            })
+                          })
+                        }} />
+                    </div>
+
+                    {(watch('multiips') === true) &&
+                      getValues('slices').flatMap((slice, sliceIndex) => {
+                        return (
+                          slice.dnns.map((dn, dnIndex) => {
+                            const key = `slice-${sliceIndex}-dn-${dnIndex}`;
+                            return (
+                              <div key={key} style={{ display: 'flex', gap: '20px', alignItems: 'center', flexDirection: 'row' }}>
+                                <div className="form-group">
+                                  <label>Start IPv4 Address for Slice {sliceIndex} [SST: {slice.sst}, SD: {slice.sd}] and DN [{dn.name}] </label>
+                                  <input
+                                    name={`slices.${sliceIndex}.dnns.${dnIndex}.startIPv4`}
+                                    type="text"
+                                    {...register(`slices.${sliceIndex}.dnns.${dnIndex}.startIPv4`, {
+                                      required: 'Please enter an IPv4 address that serves as the lower end for the assigned UE IP addresses.',
+                                      pattern: { value: /^$|^(?:[0-9]{1,3}\.){3}[0-9]{1,3}\/([1-9]|[12][0-9]|3[01])$/, message: 'The static IPv4 address must be in CIDR notation (e.g. 10.60.0.1/24).' }
+                                    })}
+                                    onInput={(e) => {
+                                      setValue(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`, e.target.value);
+                                      if (e.target.value.includes('/')) {
+                                        trigger(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`)
+                                        if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && ueNum > 0) {
+                                          let [ip, subnetSize] = e.target.value.split('/');
+                                          let end = incrementIP(ip, ueNum);
+                                          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end + '/' + subnetSize);
+                                        }
+                                      }
+                                    }}
+                                    className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 ? 'is-invalid' : ''}`} />
+                                  <div className="invalid-feedback">{errors.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4?.message}</div>
+                                </div>
+                                <div className="form-group" style={{ flexGrow: 2 }}>
+                                  <label>Last Assigned IPv4 Address</label>
+                                  <input
+                                    name={`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`}
+                                    type="text"
+                                    {...register(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`)}
+                                    readOnly={true}
+                                    className='form-control' />
+                                </div>
+                              </div>
+                            )
+                          })
+                        )
+                      })
+                    }
                   </div>
                 }
               </div>
@@ -344,30 +451,34 @@ function SubscriberModal(props) {
                 <div className="invalid-feedback">{errors.sqn?.message}</div>
               </div>
 
-              <div className="form-group">
-                <label>Operator Code Type</label>
-                <select defaultValue="OP" {...register('opCodeType')}>
-                  <option value="OP">OP</option>
-                  <option value="OPc">OPc</option>
-                </select>
-              </div>
+              <div style={{ display: 'flex', gap: '50px', flexDirection: 'row' }}>
+                <div className="form-group">
+                  <label>Operator Code Type</label>
+                  <br></br>
+                  <select defaultValue="OP" {...register('opCodeType')}>
+                    <option value="OP">OP</option>
+                    <option value="OPc">OPc</option>
+                  </select>
+                </div>
 
-              <div className="form-group">
-                <label>Operator Code</label>
-                <input
-                  name="opCode"
-                  type="text"
-                  {...register('opCode', {
-                    required: 'Please enter an operator code. An operator code must consist of 32 characters in hexadecimal form (upper or lower case).',
-                    pattern: { value: /^[A-Fa-f0-9]{32}$/, message: 'An operator code must consist of 32 characters in hexadecimal form (upper or lower case).' }
-                  })}
-                  className={`form-control ${errors.opCode ? 'is-invalid' : ''}`} />
-                <div className="invalid-feedback">{errors.opCode?.message}</div>
+                <div className="form-group" style={{ flexGrow: 2 }}>
+                  <label>Operator Code</label>
+                  <input
+                    name="opCode"
+                    type="text"
+                    {...register('opCode', {
+                      required: 'Please enter an operator code. An operator code must consist of 32 characters in hexadecimal form (upper or lower case).',
+                      pattern: { value: /^[A-Fa-f0-9]{32}$/, message: 'An operator code must consist of 32 characters in hexadecimal form (upper or lower case).' }
+                    })}
+                    className={`form-control ${errors.opCode ? 'is-invalid' : ''}`}
+                  />
+                  <div className="invalid-feedback">{errors.opCode?.message}</div>
+                </div>
               </div>
             </div>
 
             <div className="subscriber-config-block">
-              <SlicesArray {...{ control, register, errors, watch }} />
+              <SlicesArray {...{ control, register, errors, watch, unregister, getValues, setValue }} />
             </div>
 
             <button disabled={isSubmitting} className="btn btn-primary">
@@ -390,6 +501,6 @@ function SubscriberModal(props) {
           <div className="alert alert-danger mt-3 mb-0">Error loading subscriber details: {subscriberError.message}</div>
         }
       </Modal.Body>
-    </Modal>
+    </Modal >
   );
 }

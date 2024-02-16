@@ -19,6 +19,9 @@ function Subscribers() {
   const [duplicateSubscriber, setDuplicateSubscriber] = useState(false);
   const [modalAction, setModalAction] = useState(null);
 
+  //const [showStaticIPs, setShowStaticIPs] = useState(false);
+  //const toggleShowStaticIPs = () => setShowStaticIPs(!showStaticIPs);
+
   //const renderCounter = useRef(0);
 
   const handleNew = () => {
@@ -36,6 +39,10 @@ function Subscribers() {
     setDuplicateSubscriber(false);
     toggleModal();
   };
+
+  //const handleShowStaticIPs = () => {
+  //  toggleShowStaticIPs();
+  //}
 
   const handleDelete = ({ supi, plmnId }) => {
     if (!window.confirm(`Delete subscriber ${plmnId}--${supi}?`))
@@ -88,11 +95,21 @@ function Subscribers() {
 
             {error && <div className="text-danger" style={{ marginLeft: '30px', paddingBottom: '30px' }}>Error in subscriber action: {error.message}</div>}
 
-            <Button variant="primary"
-              style={{ marginLeft: '30px', width: '130px' }}
-              onClick={handleNew}>
-              New Subscriber
-            </Button>
+            {error && console.log(error)}
+
+            <div style={{ display: 'flex', float: 'right', flexDirection: 'row' }}>
+              <Button variant="primary"
+                style={{ marginLeft: '30px', width: '130px' }}
+                onClick={handleNew}>
+                New Subscriber
+              </Button>
+
+              {/*<Button variant="primary"
+                style={{ marginLeft: '30px', width: '210px' }}
+                onClick={handleShowStaticIPs}>
+                {showStaticIPs ? 'Show' : 'Hide'} Static UE IP Addresses
+              </Button>*/}
+            </div>
 
             <div className="content subscribers__content">
               {subscribers.length &&
@@ -103,6 +120,7 @@ function Subscribers() {
                       <th>PLMN ID</th>
                       <th>SUPI</th>
                       <th>MSISDN</th>
+                      {/*<th hidden={showStaticIPs}>Static IPs</th>*/}
                       <th></th>
                     </tr>
                   </thead>
@@ -110,10 +128,11 @@ function Subscribers() {
                     {subscribers.map((subscriber, index) => {
                       return (
                         <tr key={subscriber.supi}>
-                          <td>{index+1}</td>
+                          <td>{index + 1}</td>
                           <td>{subscriber.plmnId}</td>
                           <td>{subscriber.supi}</td>
                           <td>{subscriber.msisdn === '' ? '-' : subscriber.msisdn}</td>
+                          {/*<td hidden={showStaticIPs}><StaticIPsDisplay subscriber={subscriber} slices={subscriber.slices}/></td>*/}
                           <td style={{ textAlign: 'left' }}>
                             <Button variant="primary" style={{ marginRight: '10px' }} onClick={() => handleModify({ supi: subscriber.supi, plmnId: subscriber.plmnId })} >Modify/ Show</Button>
                             <Button variant="info" style={{ marginRight: '10px' }} onClick={() => handleDuplicate({ supi: subscriber.supi, plmnId: subscriber.plmnId })}>Duplicate</Button>
@@ -134,7 +153,7 @@ function Subscribers() {
               }
             </div>
             {subscribers?.length > 10 &&
-            //second button for convenience if list is long (no scrolling to top)
+              //second button for convenience if list is long (no scrolling to top)
               <Button variant="primary"
                 style={{ marginLeft: '30px', width: '130px' }}
                 onClick={handleNew}>
