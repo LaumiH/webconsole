@@ -25,15 +25,15 @@ let defaultSubscriber = {
           default5qi: 2,
           upSecurity: false,
           flows: [
-            {
-              filter: '',
-              precedence: 120,
-              fiveQi: 5,
-              gbrUL: '1 Tbps',
-              gbrDL: '1 Tbps',
-              mbrUL: '1 Tbps',
-              mbrDL: '1 Tbps'
-            }
+            //{
+            //  filter: 'permit out ip from any to 10.60.0.0/16',
+            //  precedence: 120,
+            //  fiveQi: 5,
+            //  gbrUL: '1 Tbps',
+            //  gbrDL: '1 Tbps',
+            //  mbrUL: '1 Tbps',
+            //  mbrDL: '1 Tbps'
+            //}
           ]
         }
       ],
