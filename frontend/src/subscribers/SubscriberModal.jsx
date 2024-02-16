@@ -5,7 +5,7 @@ import { useEffect, useCallback } from 'react';
 import { SlicesArray } from './SlicesArray';
 import _ from 'lodash';
 import { useState } from 'react';
-import { backendToFrontend, frontendToBackend } from './marshalHelper';
+import { backendToFrontend, frontendToBackend, incrementIP, ipToInteger, integerToIp } from './marshalHelper';
 import { Button } from 'react-bootstrap';
 import { store, subscribersActions } from '../_store';
 import { defaultSubscriber } from './defaultSubscriber';
@@ -29,9 +29,9 @@ function SubscriberModal(props) {
   // set the detailed subscriber data
   useEffect(() => {
     if (!_.isEmpty(detailedSubscriber) && !detailedSubscriber.loading) {
-      reset(backendToFrontend(detailedSubscriber));
+      reset(backendToFrontend(detailedSubscriber, props.duplicateSubscriber));
     }
-  }, [detailedSubscriber, reset]);
+  }, [detailedSubscriber, props.duplicateSubscriber, reset]);
 
   const onSubmit = async (data, e) => {
     // prevent browser from reloading, as we do that with our change in the subscribers list
@@ -57,13 +57,6 @@ function SubscriberModal(props) {
       alert('The SUPI already exists for this PLMN. Choose a different SUPI or PLMN ID!');
       return false;
     }
-
-    // A susbcriber cannot be created if it has the same static IP address as the duplicated one
-    //if (props.duplicateSubscriber
-    //  && _.isEqual(previousStaticIP, newStaticIP)) {
-    //  alert('The static IP address already exists. Choose a different static IP address!');
-    //  return false;
-    //}
 
     // If a subscriber is not modified (aka only shown), do not post/ put any changes
     if (!props.duplicateSubscriber && !props.newSubscriber
@@ -123,39 +116,15 @@ function SubscriberModal(props) {
     }
   };
 
-  function ipToInteger(ip) {
-    return ip.split('.').reduce((acc, octet) => ((acc * 256) + parseInt(octet, 10)) >>> 0, 0);
-  }
-
-  function integerToIp(int) {
-    return [
-      (int >>> 24) & 0xFF,
-      (int >>> 16) & 0xFF,
-      (int >>> 8) & 0xFF,
-      int & 0xFF
-    ].join('.');
-  }
-
   //const startIPv4 = watch('startIPv4');
   const ueNum = watch('userNumber');
 
-  const calculateEndIPv4Address = useCallback((startIPv4, ueNum) => {
-    let [ip, subnetSize] = startIPv4.split('/');
-    let startIpInt = ipToInteger(ip);
-    let lastIpInt = (startIpInt + ueNum - 1) >>> 0;
-    return [ip, integerToIp(lastIpInt)];
-  }, []);
-
-  function incrementIP(inputIP, num) {
-    var newIP = inputIP;
-    while (num > 1) {
-      let ip = (newIP[0] << 24) | (newIP[1] << 16) | (newIP[2] << 8) | (newIP[3] << 0);
-      ip++;
-      newIP = [(ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip >> 0) & 0xff];
-      num--;
-    }
-    return newIP;
-  }
+  //const calculateEndIPv4Address = useCallback((startIPv4, ueNum) => {
+  //  let [ip, subnetSize] = startIPv4.split('/');
+  //  let startIpInt = ipToInteger(ip);
+  //  let lastIpInt = (startIpInt + ueNum - 1) >>> 0;
+  //  return [ip, integerToIp(lastIpInt)];
+  //}, []);
 
   // Effect hook to perform an action when startIPv4 changes and is valid
   useEffect(() => {
@@ -164,13 +133,21 @@ function SubscriberModal(props) {
       return slice.dnns.map((dn, dnIndex) => {
         if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && dn.staticIPv4.includes('/') && ueNum > 0) {
           let [ip, subnetSize] = dn.staticIPv4.split('/');
-          let end = incrementIP(ip.split('.'), ueNum);
-          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end.join('.') + '/' + subnetSize);
+          let end = incrementIP(ip, ueNum);
+          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end + '/' + subnetSize);
         }
         return ''
       })
     })
-  }, [ueNum, calculateEndIPv4Address, getValues, setValue, errors?.slices]); // Make sure to include all dependencies
+  }, [ueNum, getValues, setValue, errors?.slices]); // Make sure to include all dependencies
+
+  //useEffect(() => {
+  //  if (props.duplicateSubscriber === true && !detailedSubscriber.loading) {
+  //    console.log('msin will be set to ', detailedSubscriber.msin+1);
+  //    setValue('msin', detailedSubscriber.msin+1);
+  //    console.log(detailedSubscriber);
+  //  }
+  //}, [detailedSubscriber.msin, props.duplicateSubscriber, setValue]);
 
   return (
     <Modal show={props.show} onHide={() => {
@@ -280,8 +257,8 @@ function SubscriberModal(props) {
                                         trigger(`slices.${sliceIndex}.dnns.${dnIndex}.staticIPv4`)
                                         if (!errors?.slices?.[sliceIndex]?.dnns?.[dnIndex]?.staticIPv4 && ueNum > 0) {
                                           let [ip, subnetSize] = e.target.value.split('/');
-                                          let end = incrementIP(ip.split('.'), ueNum);
-                                          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end.join('.') + '/' + subnetSize);
+                                          let end = incrementIP(ip, ueNum);
+                                          setValue(`slices.${sliceIndex}.dnns.${dnIndex}.endIPv4`, end + '/' + subnetSize);
                                         }
                                       }
                                     }}

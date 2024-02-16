@@ -1,6 +1,6 @@
 import _ from 'lodash';
 
-export { frontendToBackend, backendToFrontend };
+export { frontendToBackend, backendToFrontend, ipToInteger, integerToIp, incrementIP };
 
 function snssaiToString({ sst, sd }) {
   return parseInt(sst).toString(16).padStart(2, '0').toUpperCase() + sd;
@@ -20,8 +20,32 @@ const plmnIdToMccMnc = (plmnId) => {
   }
 };
 
+function ipToInteger(ip) {
+  return ip.split('.').reduce((acc, octet) => ((acc * 256) + parseInt(octet, 10)) >>> 0, 0);
+}
+
+function integerToIp(int) {
+  return [
+    (int >>> 24) & 0xFF,
+    (int >>> 16) & 0xFF,
+    (int >>> 8) & 0xFF,
+    int & 0xFF
+  ].join('.');
+}
+
+function incrementIP(inputIP, num) {
+  var newIP = inputIP.split('.');
+  while (num > 1) {
+    let ip = (newIP[0] << 24) | (newIP[1] << 16) | (newIP[2] << 8) | (newIP[3] << 0);
+    ip++;
+    newIP = [(ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip >> 0) & 0xff];
+    num--;
+  }
+  return newIP.join('.');
+}
+
 // transforms the backend data to the subscriber data used in the frontend
-function backendToFrontend(backend) {
+function backendToFrontend(backend, duplicate) {
   console.log('data received from backend', backend);
 
   let defaultSingleNssais = _.get(backend, 'AccessAndMobilitySubscriptionData.nssai.defaultSingleNssais', []).map(nssai => {
@@ -89,7 +113,14 @@ function backendToFrontend(backend) {
       const staticIpAddress = dnnConfigs[dnn].staticIpAddress;
       if (staticIpAddress && staticIpAddress.length !== 0) {
         staticIPv4 += staticIpAddress.reduce((total, element) => {
-          return total + element['ipv4Addr']
+          let ipv4 = element['ipv4Addr'];
+          if (duplicate) {
+            let [ip, subnetSize] = ipv4.split('/')
+
+            // increase static IP addresses by 1 each
+            ipv4 = incrementIP(ip, 2) + '/' + subnetSize
+          }
+          return total + ipv4
         }, '')
       }
 
@@ -114,14 +145,29 @@ function backendToFrontend(backend) {
   });
 
   let opCode = _.get(backend, 'AuthenticationSubscription.milenage.op.opValue', '');
+
   let supi = _.get(backend, 'supi');
   let plmnId = '' + _.get(backend, 'plmnId');
+  let msinString = supi.replace('imsi-', '').replace(plmnId, '')
+  let msin = parseInt(msinString)
+  if (duplicate) {
+    let newMsinString = msinString.replace(msin, msin+1)
+    msin += 1
+    supi = supi.replace(msinString, newMsinString)
+  }
+
   let { mcc, mnc } = plmnIdToMccMnc(plmnId);
-  let msisdn = ''+_.get(backend, 'AccessAndMobilitySubscriptionData.gpsis', [])?.filter(gpsi => gpsi != null && gpsi.includes('msisdn-'));
-  if (msisdn === '') {
-    msisdn = '-';
+  let msisdnString = ''+_.get(backend, 'AccessAndMobilitySubscriptionData.gpsis', [])?.filter(gpsi => gpsi != null && gpsi.includes('msisdn-'));
+  if (msisdnString === '') {
+    msisdnString = '-';
   } else {
-    msisdn = msisdn.replace('msisdn-', '');
+    if (duplicate) {
+      let msisdn = parseInt(msisdnString)
+      let newMsisdnString = msisdnString.replace(msisdn, msisdn+1)
+      msisdnString = newMsisdnString.replace('msisdn-', '');
+    } else {
+      msisdnString = msisdnString.replace('msisdn-', '');
+    }
   }
 
   let subscriber = {
@@ -129,8 +175,8 @@ function backendToFrontend(backend) {
     plmnId: plmnId,
     mcc: mcc,
     mnc: mnc,
-    msin: parseInt(supi.replace('imsi-', '').replace(plmnId, '')),
-    msisdn: msisdn,
+    msin: msin,
+    msisdn: msisdnString,
     key: _.get(backend, 'AuthenticationSubscription.permanentKey.permanentKeyValue'),
     amf: _.get(backend, 'AuthenticationSubscription.authenticationManagementField'),
     sqn: _.get(backend, 'AuthenticationSubscription.sequenceNumber'),

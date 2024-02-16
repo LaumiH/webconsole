@@ -1339,8 +1339,6 @@ func PostSubscriberByID(c *gin.Context) {
 
 	staticIPv4sPerDN := extractStaticIPv4s(subsData.SessionManagementSubscriptionData)
 
-	logger.ProcLog.Infof("Static IPs: %+v", staticIPv4sPerDN)
-
 	// check if static IPv4 address has already been configured for a UE in the same PLMN, slice and DN
 	/*
 		model
@@ -1390,26 +1388,39 @@ func PostSubscriberByID(c *gin.Context) {
 		ueIdTemp += 1
 
 		if len(staticIPv4sPerDN) > 0 {
+			logger.ProcLog.Infof("Static IPs for UE %s: %+v", ueId, staticIPv4sPerDN)
 			increasedStaticIPv4sPerDN := make(map[string][]string)
-			for dnn, ips := range staticIPv4sPerDN {
-				for _, smd := range subsData.SessionManagementSubscriptionData {
-					dn := smd.DnnConfigurations[dnn]
+			sessionManagementSubscriptionDataSlice := []models.SessionManagementSubscriptionData{}
+			for _, smd := range subsData.SessionManagementSubscriptionData {
+				newSessionManagementSubscriptionData := smd
+				newSessionManagementSubscriptionData.DnnConfigurations = make(map[string]models.DnnConfiguration)
+				for dnn, ips := range staticIPv4sPerDN {
+					// get the matching dnConfig
+					dnConfig := smd.DnnConfigurations[dnn]
+					// clear all previously assigned IPs
+					dnConfig.StaticIpAddress = []models.IpAddress{}
 					for _, ip := range ips {
-						dn.StaticIpAddress = []models.IpAddress{}
-						dn.StaticIpAddress = append(dn.StaticIpAddress, models.IpAddress{
+						dnConfig.StaticIpAddress = append(dnConfig.StaticIpAddress, models.IpAddress{
 							Ipv4Addr: ip,
 						})
+
 						if userNumber > 1 {
 							//increase static IP address for next UE
 							newIP := increaseIPv4(ip)
-							logger.ProcLog.Infof("Increased static IP: %s", newIP)
 							increasedStaticIPv4sPerDN[dnn] = append(increasedStaticIPv4sPerDN[dnn], newIP)
 						}
 					}
+					// write back the changes
+					newSessionManagementSubscriptionData.DnnConfigurations[dnn] = dnConfig
 				}
+
+				sessionManagementSubscriptionDataSlice = append(sessionManagementSubscriptionDataSlice, newSessionManagementSubscriptionData)
 			}
 			staticIPv4sPerDN = increasedStaticIPv4sPerDN
+			subsData.SessionManagementSubscriptionData = sessionManagementSubscriptionDataSlice
 		}
+
+		logger.ProcLog.Infof("subsData.SessionManagementSubscriptionData: %+v", subsData.SessionManagementSubscriptionData)
 
 		//existingIPv4, existingSlice, err := checkDuplicateStaticIPv4Address(servingPlmnId, subsData.SessionManagementSubscriptionData)
 		//if err != nil {
