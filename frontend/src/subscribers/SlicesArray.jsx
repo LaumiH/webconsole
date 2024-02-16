@@ -184,7 +184,7 @@ function FlowConfigArray({ sliceIndex, nestIndex, control, register, errors }) {
                 type="text"
                 name={`slices.${sliceIndex}.dnns.${nestIndex}.flows.${k}.filter`}
                 {...register(`slices.${sliceIndex}.dnns.${nestIndex}.flows.${k}.filter`, {
-                  required: 'Please enter an IP filter.',
+                  //required: 'Please enter an IP filter.',
                   //TODO: what does such a filter look like?
                 })}
                 className={`form-control ${errors.slices?.[sliceIndex]?.dnns?.[nestIndex].flows?.[k]?.filter ? 'is-invalid' : ''}`} />
